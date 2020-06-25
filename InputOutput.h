@@ -25,6 +25,7 @@ void LockFile(int fileDescription);
 void UnlockFile(int fileDescription);
 int StringCompare(char* first, char* second);
 int ReadFile(char* filename, int fileDescription, void* buffer, int count);
+int ReadOneLine(char * filename, int fileDescription, char * buffer);
 
 /*End of declaration*/
 
@@ -214,5 +215,24 @@ int WriteFile(char* filename, int fileDescription, void* buffer, int count)
         exit(-1);
     }
     return result;
+}
+
+int ReadOneLine(char * filename, int fileDescription, char * buffer)
+{
+    int i = 0;
+    char temp;
+    if(0 == ReadFile(filename, fileDescription, &temp, 1))
+    {
+        return 0;
+    }
+    buffer[i] = temp;
+    ++i;
+    while(temp != '\n' && ReadFile(filename, fileDescription, &temp, 1))
+    {
+        buffer[i] = temp;
+        ++i;
+    }
+    buffer[i] = '\0';
+    return i;
 }
 #endif
