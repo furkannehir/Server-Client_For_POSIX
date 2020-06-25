@@ -6,6 +6,7 @@
 typedef struct Graph{
     int ** AdjList;
     int size;
+    int edgeCount;
 }Graph;
 
 void CreateGraph(Graph * graph, int size);
@@ -16,6 +17,7 @@ int GetMaxNodeID(char * filename);
 void CreateGraph(Graph * graph, int size)
 {
     graph->size = size;
+    graph->edgeCount = 0;
     graph->AdjList = (int**)calloc(sizeof(int*), size);
     int i;
     for(i = 0; i < size; ++i)
@@ -41,6 +43,7 @@ int FillTheGraph(Graph * graph, char * filename)
             if(second > graph->size || second < 0)
                 return -1;
             graph->AdjList[first][second] = 1;
+            ++graph->edgeCount;
         }
     }
     CloseFile(filename, fd);

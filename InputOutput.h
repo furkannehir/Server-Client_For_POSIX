@@ -17,7 +17,7 @@ char READ[10] = "READ";
 char WRITE[10] = "WRITE";
 char WR[10] = "WR";
 
-void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * pathToLogFile);
+void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile);
 int StringToInt(char* strToInt, int size);
 int OpenFile(char* filename, char* mode);
 void CloseFile(char * filename, int fileDescription);
@@ -29,7 +29,7 @@ int ReadOneLine(char * filename, int fileDescription, char * buffer);
 
 /*End of declaration*/
 
-void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * pathToLogFile)
+void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile)
 {
     if(argc > 7)
     {
@@ -53,6 +53,7 @@ void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, c
                 break;
             case 'p':
                 *port = StringToInt(optarg, strlen(optarg));
+                strcpy(portString, optarg);
                 break;
             case 'o':
                 strcpy(pathToLogFile, optarg);
