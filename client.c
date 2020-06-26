@@ -18,7 +18,8 @@ int main(int argc, char ** argv)
 { 
     GetArgumentsClient(argc, argv, IP, &port, portString, &sourceNode, &destNode);
     int cfd;
-    ssize_t numRead;
+    char path[5000];
+    char sourceDestString[100];
     struct addrinfo hints;
     struct addrinfo *result, *rp;
     memset(&hints, 0, sizeof(struct addrinfo));
@@ -39,11 +40,18 @@ int main(int argc, char ** argv)
         if (cfd == -1)
             continue;
         if (connect(cfd, rp->ai_addr, rp->ai_addrlen) != -1)
+        {
             break;
+        }
         close(cfd);
     }
     if (rp == NULL)
         printf("Could not connect socket to any address\n");
     freeaddrinfo(result);
+    sprintf(sourceDestString, "%d %d", sourceNode, destNode);
+    WriteFile("pipe", cfd, sourceDestString, 100);
+    ReadOneLine("pipe", cfd, path);
+    CloseFile("pipe",cfd);
+    printf("%s\n", path);
     return 0;
 }

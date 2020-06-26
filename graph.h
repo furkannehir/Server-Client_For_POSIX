@@ -2,19 +2,9 @@
 #define GRAPH
 #include<unistd.h>
 #include"InputOutput.h"
+#include"linkedList.h"
+#include"queue.h"
 
-typedef struct Node
-{
-    int id;
-    struct Node * next;
-}Node;
-
-
-typedef struct LinkedList{
-    Node * root;
-    Node * last;
-    int size;
-}LinkedList;
 
 typedef struct Graph{
     LinkedList * AdjList;
@@ -22,60 +12,17 @@ typedef struct Graph{
     int edgeCount;
 }Graph;
 
-void AddNode(LinkedList * list, int id);
-LinkedList CreateLinkedList();
-void DestroyLinkedList(LinkedList * list);
 void CreateGraph(Graph * graph, int size);
 int FillTheGraph(Graph * graph, char * filename);
 void DestroyGraph(Graph * graph);
 int GetMaxNodeID(char * filename);
-
-void AddNode(LinkedList * list, int id)
-{
-    Node * node = (Node*)malloc(sizeof(Node));
-    node->id = id;
-    node->next = NULL;
-    if(list->root == NULL)
-    {
-        list->root = node;
-        list->last = list->root;
-    }
-    else
-    {
-        list->last->next = node;
-        list->last = list->last->next;
-    }
-    ++list->size;
-}
-
-LinkedList CreateLinkedList()
-{
-    LinkedList list;
-    list.root = NULL;
-    list.last = NULL;
-    list.size = 0;
-    return list;
-}
-
-void DestroyLinkedList(LinkedList * list)
-{
-    Node * one = list->root;
-    Node * second = list->root;
-    second = second->next;
-    int i;
-    for(i = 0; i < list->size; ++i)
-    {
-        free(one);
-        one = second;
-        second = second->next;
-    }
-}
+int BreadthFirstSearch(Graph * graph, int startNode, int endNode, Queue * path);
 
 void CreateGraph(Graph * graph, int size)
 {
     graph->size = size;
     graph->edgeCount = 0;
-    graph->AdjList = (LinkedList*)calloc(sizeof(LinkedList), size);
+    graph->AdjList = (LinkedList*)calloc(size, sizeof(LinkedList));
     int i;
     for(i = 0; i < size; ++i)
     {
@@ -146,7 +93,6 @@ void PrintGraph(Graph graph)
     {
         Node * node = graph.AdjList[i].root;
         printf("%d: ", i);
-        // printf("size: %d", graph.AdjList[i].size);
         for(j = 0; j < graph.AdjList[i].size; ++j)
         {
             printf("%d, ", node->id);
@@ -154,5 +100,70 @@ void PrintGraph(Graph graph)
         }
         printf("\n");
     }
+}
+int BreadthFirstSearch(Graph * graph, int startNode, int endNode, Queue * path)
+{
+    if(startNode == endNode)
+    {
+        return 1;
+    }
+    *path = CreateQueue();
+    LinkedList reversePath = CreateLinkedList();
+    Queue queue = CreateQueue();
+    int pred[graph->size];
+    int dist[graph->size];
+    int visited[graph->size];
+    memset(&pred, -1, graph->size);
+    memset(&dist, __INT_MAX__,  graph->size);
+    memset(&visited, 0,  graph->size);
+    int curNode,i,isTherePath = 0;
+    Enqueue(&queue, startNode);
+    visited[startNode] = 1;
+    dist[startNode] = 0;
+    Node * node;
+    while(!QueueIsEmpty(&queue))
+    {
+        curNode = Dequeue(&queue);
+        // printf("curNode: %d\n", curNode);
+        node = graph->AdjList[curNode].root;
+        for(i = 0; i < graph->AdjList[curNode].size; i++)
+        {
+            if(!visited[node->id])
+            {
+                visited[node->id] = 1;
+                dist[node->id] = dist[curNode] + 1;
+                pred[node->id] = curNode;
+                Enqueue(&queue, node->id);
+            }
+            node = node->next;
+        }
+        if(curNode == endNode)
+        {
+            isTherePath = 1;
+            break;
+        }
+    }
+    if(isTherePath)
+    {
+        int crawl = endNode;
+        AddNode(&reversePath, crawl);
+        while (pred[crawl] != -1) { 
+            AddNode(&reversePath, pred[crawl]);
+            crawl = pred[crawl]; 
+        }
+        int temp[reversePath.size];
+        Node * node = reversePath.root;
+        for(i = 0; i < reversePath.size; ++i)
+        {
+            temp[i] = node->id;
+            node = node->next;
+        }
+        for(i = reversePath.size-1; i >= 0; --i)
+        {
+            Enqueue(path, temp[i]);
+        }
+        return 1;
+    }
+    return 0;
 }
 #endif

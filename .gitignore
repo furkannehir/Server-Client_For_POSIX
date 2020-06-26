@@ -5,3 +5,5 @@ client
 input
 logfile
 *.txt
+temp.*
+temp

@@ -1,4 +1,5 @@
 #include<unistd.h>
+#include<pthread.h>
 #include<sys/stat.h>
 #include<sys/socket.h>
 #include<sys/types.h> 
@@ -10,21 +11,32 @@
 #include"graph.h"
 #define MAX 80
 #define BACKLOG 50
-#define INT_LEN 30
+#define INT_LEN 3000
 
+// TODO Threads
+// TODO Thread Pool -> array + mutex
+// TODO Cache -> Hashmap + mutex
+// TODO Reader-Writer -r
 
 int CreateConnection();
 void CreateAddrInfo(struct addrinfo * addr);
 int GetSocketFileDescriptor();
+int CloseSTD();
+
 
 char pathToFile[500];
 char pathToLogFile[500];
 int port, poolThread, maxPool;
 char portString[500];
 Graph graph;
+int * threadPool;
+int * emptyThreads;
+pthread_mutex_t tPoolMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t tPoolLock = PTHREAD_COND_INITIALIZER;
 
 int main(int argc, char ** argv)
 {
+    setbuf(stdout, NULL);
     GetArgumentsServer(argc, argv, pathToFile, &port, portString, pathToLogFile, &poolThread, &maxPool);
     int pid = fork();
     switch (pid)
@@ -39,16 +51,7 @@ int main(int argc, char ** argv)
     setsid();
     umask(0);
     //chdir("/");
-    // CloseFile("stdin", STDIN_FILENO);
-    // CloseFile("stdout", STDOUT_FILENO);
-    // CloseFile("stderr", STDERR_FILENO);
-    // int fdOut = OpenFile(pathToLogFile, WR);
-    // if (fdOut != STDIN_FILENO) /* 'fd' should be 0 */
-    //     return -1;
-    // if (dup2(STDIN_FILENO, STDOUT_FILENO) != STDOUT_FILENO)
-    //     return -1;
-    // if (dup2(STDIN_FILENO, STDERR_FILENO) != STDERR_FILENO)
-    //     return -1;
+    int fdOut = CloseSTD();
     printf("Loading graph...\n");
     int begin = clock();
     int size = GetMaxNodeID(pathToFile);
@@ -59,30 +62,25 @@ int main(int argc, char ** argv)
     double loadTime = end - begin;
     loadTime = loadTime / 1000000;
     printf("Graph loaded in %.2f seconds with %d nodes and %d edges.\n", loadTime, size, graph.edgeCount);
-    PrintGraph(graph);
-    //FOR PRINTING GRAPH
-    // int i,j;
-    // for(i = 0; i < graph.size; ++i)
-    // {
-    //     for(j = 0; j < graph.size; ++j)
-    //         printf("%d ", graph.AdjList[i][j]);
-    //     printf("\n");
-    // }
+    // PrintGraph(graph);
     CreateConnection();
     DestroyGraph(&graph);
+    CloseFile("stdout", fdOut);
 }
 
 
 int CreateConnection()
 {
-    uint32_t seqNum;
-    char reqLenStr[INT_LEN]; /* Length of requested sequence */
-    char seqNumStr[INT_LEN]; /* Start of granted sequence */
     struct sockaddr_storage claddr;
     int cfd;
     socklen_t addrlen;
-    int socketID = GetSocketFileDescriptor();
-    printf("socketid: %d\n", socketID);
+    char reqLenStr[INT_LEN];
+    #define ADDRSTRLEN (NI_MAXHOST + NI_MAXSERV + 10)
+    char addrStr[ADDRSTRLEN];
+    char host[NI_MAXHOST];
+    char service[NI_MAXSERV];
+    int socketID;
+    socketID = GetSocketFileDescriptor();
     addrlen = sizeof(struct sockaddr_storage);
     cfd = accept(socketID, (struct sockaddr *) &claddr, &addrlen);
     if (cfd == -1) {
@@ -92,6 +90,22 @@ int CreateConnection()
     {
         printf("Connection established\n");
     }
+    if (getnameinfo((struct sockaddr *) &claddr, addrlen, host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0)
+        snprintf(addrStr, ADDRSTRLEN, "(%s, %s)", host, service);
+    else
+        snprintf(addrStr, ADDRSTRLEN, "(?UNKNOWN?)");
+    printf("Connection from %s\n", addrStr);
+    ReadFile("pipe", cfd, reqLenStr, INT_LEN);
+    printf("%s\n", reqLenStr);
+    int start, destination;
+    sscanf(reqLenStr, "%d %d", &start, &destination);
+    Queue path;
+    path = CreateQueue();
+    BreadthFirstSearch(&graph, start, destination, &path);
+    char pathString[5000];
+    QueueString(path, pathString);
+    WriteFile("pipe", cfd, pathString, strlen(pathString));
+    close(cfd);
     close(socketID); 
     return 0;
 }
@@ -113,9 +127,6 @@ int GetSocketFileDescriptor()
     struct addrinfo *result, *rp;
 #define ADDRSTRLEN (NI_MAXHOST + NI_MAXSERV + 10)
     int fileDesc;
-    char addrStr[ADDRSTRLEN];
-    char host[NI_MAXHOST];
-    char service[NI_MAXSERV];
     CreateAddrInfo(&hints);
     if (getaddrinfo(NULL, portString, &hints, &result) != 0)
     {
@@ -146,4 +157,19 @@ int GetSocketFileDescriptor()
     }
     freeaddrinfo(result);
     return fileDesc;
+}
+
+int CloseSTD()
+{
+    CloseFile("stdin", STDIN_FILENO);
+    CloseFile("stdout", STDOUT_FILENO);
+    CloseFile("stderr", STDERR_FILENO);
+    int fdOut = OpenFile(pathToLogFile, WR);
+    if (fdOut != STDIN_FILENO) /* 'fd' should be 0 */
+        return -1;
+    if (dup2(STDIN_FILENO, STDOUT_FILENO) != STDOUT_FILENO)
+        return -1; 
+     if (dup2(STDIN_FILENO, STDERR_FILENO) != STDERR_FILENO)
+        return -1;
+    return fdOut; 
 }
