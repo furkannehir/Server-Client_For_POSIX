@@ -17,7 +17,8 @@ char READ[10] = "READ";
 char WRITE[10] = "WRITE";
 char WR[10] = "WR";
 
-void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile);
+void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile, int * poolThread, int * maxPool);
+void GetArgumentsClient(int argc,char ** argv, char * IP, int * port, char * portString, int * sourceNode, int * destNode);
 int StringToInt(char* strToInt, int size);
 int OpenFile(char* filename, char* mode);
 void CloseFile(char * filename, int fileDescription);
@@ -29,22 +30,22 @@ int ReadOneLine(char * filename, int fileDescription, char * buffer);
 
 /*End of declaration*/
 
-void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile)
+void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile, int * poolThread, int * maxPool)
 {
-    if(argc > 7)
+    if(argc > 11)
     {
         printf("Too many arguments maybe...\n");
-        printf("You should've called like that: ./program -i pathToFile -p PORT -o pathToLogFile\n");
+        printf("You should've called like that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24\n");
         exit(-1);
     }
-    if(argc < 7)
+    if(argc < 11)
     {
         printf("Too little arguments maybe...\n");
-        printf("You should've called like that: ./program -i pathToFile -p PORT -o pathToLogFile\n");
+        printf("You should've called like that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24\n");
         exit(-1);
     }
     int opt;
-    while((opt = getopt(argc, argv, "i:p:o:")) != -1)  
+    while((opt = getopt(argc, argv, "i:p:o:s:x:")) != -1)  
     {  
         switch(opt)  
         {  
@@ -57,6 +58,51 @@ void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, c
                 break;
             case 'o':
                 strcpy(pathToLogFile, optarg);
+                break;
+            case 's':
+                *poolThread = StringToInt(optarg, strlen(optarg));
+                break;
+            case 'x':
+                *maxPool = StringToInt(optarg, strlen(optarg));
+                break;
+            default:
+                printf("Wrong argument!\n");
+                exit(-1);
+        }
+    }
+}
+
+void GetArgumentsClient(int argc,char ** argv, char * IP, int * port, char * portString, int * sourceNode, int * destNode)
+{
+    if(argc > 9)
+    {
+        printf("Too many arguments maybe...\n");
+        printf("You should've called like that: ./program -i pathToFile -p PORT -o pathToLogFile\n");
+        exit(-1);
+    }
+    if(argc < 9)
+    {
+        printf("Too little arguments maybe...\n");
+        printf("You should've called like that: ./program -i pathToFile -p PORT -o pathToLogFile\n");
+        exit(-1);
+    }
+    int opt;
+    while((opt = getopt(argc, argv, "a:p:s:d:")) != -1)  
+    {  
+        switch(opt)  
+        {  
+            case 'a':
+                strcpy(IP, optarg);
+                break;
+            case 'p':
+                *port = StringToInt(optarg, strlen(optarg));
+                strcpy(portString, optarg);
+                break;
+            case 's':
+                *sourceNode = StringToInt(optarg, strlen(optarg));
+                break;
+            case 'd':
+                *destNode = StringToInt(optarg, strlen(optarg));
                 break;
             default:
                 printf("Wrong argument!\n");

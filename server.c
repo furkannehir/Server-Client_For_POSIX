@@ -19,13 +19,13 @@ int GetSocketFileDescriptor();
 
 char pathToFile[500];
 char pathToLogFile[500];
-int port;
+int port, poolThread, maxPool;
 char portString[500];
 Graph graph;
 
 int main(int argc, char ** argv)
 {
-    GetArgumentsServer(argc, argv, pathToFile, &port, portString, pathToLogFile);
+    GetArgumentsServer(argc, argv, pathToFile, &port, portString, pathToLogFile, &poolThread, &maxPool);
     int pid = fork();
     switch (pid)
     {
@@ -59,6 +59,7 @@ int main(int argc, char ** argv)
     double loadTime = end - begin;
     loadTime = loadTime / 1000000;
     printf("Graph loaded in %.2f seconds with %d nodes and %d edges.\n", loadTime, size, graph.edgeCount);
+    PrintGraph(graph);
     //FOR PRINTING GRAPH
     // int i,j;
     // for(i = 0; i < graph.size; ++i)

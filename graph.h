@@ -3,26 +3,83 @@
 #include<unistd.h>
 #include"InputOutput.h"
 
+typedef struct Node
+{
+    int id;
+    struct Node * next;
+}Node;
+
+
+typedef struct LinkedList{
+    Node * root;
+    Node * last;
+    int size;
+}LinkedList;
+
 typedef struct Graph{
-    int ** AdjList;
+    LinkedList * AdjList;
     int size;
     int edgeCount;
 }Graph;
 
+void AddNode(LinkedList * list, int id);
+LinkedList CreateLinkedList();
+void DestroyLinkedList(LinkedList * list);
 void CreateGraph(Graph * graph, int size);
 int FillTheGraph(Graph * graph, char * filename);
 void DestroyGraph(Graph * graph);
 int GetMaxNodeID(char * filename);
 
+void AddNode(LinkedList * list, int id)
+{
+    Node * node = (Node*)malloc(sizeof(Node));
+    node->id = id;
+    node->next = NULL;
+    if(list->root == NULL)
+    {
+        list->root = node;
+        list->last = list->root;
+    }
+    else
+    {
+        list->last->next = node;
+        list->last = list->last->next;
+    }
+    ++list->size;
+}
+
+LinkedList CreateLinkedList()
+{
+    LinkedList list;
+    list.root = NULL;
+    list.last = NULL;
+    list.size = 0;
+    return list;
+}
+
+void DestroyLinkedList(LinkedList * list)
+{
+    Node * one = list->root;
+    Node * second = list->root;
+    second = second->next;
+    int i;
+    for(i = 0; i < list->size; ++i)
+    {
+        free(one);
+        one = second;
+        second = second->next;
+    }
+}
+
 void CreateGraph(Graph * graph, int size)
 {
     graph->size = size;
     graph->edgeCount = 0;
-    graph->AdjList = (int**)calloc(sizeof(int*), size);
+    graph->AdjList = (LinkedList*)calloc(sizeof(LinkedList), size);
     int i;
     for(i = 0; i < size; ++i)
     {
-        graph->AdjList[i] = (int*)calloc(sizeof(int), size);
+        graph->AdjList[i] = CreateLinkedList();
     }
 }
 
@@ -42,7 +99,7 @@ int FillTheGraph(Graph * graph, char * filename)
                 return -1;
             if(second > graph->size || second < 0)
                 return -1;
-            graph->AdjList[first][second] = 1;
+            AddNode(&graph->AdjList[first], second);
             ++graph->edgeCount;
         }
     }
@@ -55,7 +112,7 @@ void DestroyGraph(Graph * graph)
     int i;
     for(i = 0; i < graph->size; ++i)
     {
-        free(graph->AdjList[i]);
+        DestroyLinkedList(&graph->AdjList[i]);
     }
     free(graph->AdjList);
 }
@@ -80,5 +137,22 @@ int GetMaxNodeID(char * filename)
     }
     CloseFile(filename, fd);
     return max;
+}
+
+void PrintGraph(Graph graph)
+{
+    int i,j;
+    for(i = 0; i < graph.size; ++i)
+    {
+        Node * node = graph.AdjList[i].root;
+        printf("%d: ", i);
+        // printf("size: %d", graph.AdjList[i].size);
+        for(j = 0; j < graph.AdjList[i].size; ++j)
+        {
+            printf("%d, ", node->id);
+            node = node->next;
+        }
+        printf("\n");
+    }
 }
 #endif
