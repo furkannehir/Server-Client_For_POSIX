@@ -13,6 +13,7 @@ Queue CreateQueue();
 void Enqueue(Queue * queue, int value);
 int Dequeue(Queue * queue);
 int QueueIsEmpty(Queue * queue);
+void DestroyQueue(Queue * queue);
 void PrintQueue(Queue * queue);
 void QueueString(Queue queue, char * str);
 
@@ -49,6 +50,12 @@ int QueueIsEmpty(Queue * queue)
     else
         return 0;
 }
+
+void DestroyQueue(Queue * queue)
+{
+    DestroyLinkedList(&queue->list);
+}
+
 void PrintQueue(Queue * queue)
 {
     if(QueueIsEmpty(queue))
@@ -68,20 +75,24 @@ void PrintQueue(Queue * queue)
 
 void QueueString(Queue queue, char * str)
 {
-    char buffer[10];
     if(QueueIsEmpty(&queue))
-        return;
-    Node * node = queue.list.root;
-    sprintf(buffer, "%d", node->id);
-    strcat(str, buffer);
-    node = node->next;
-    int i;
-    for(i = 1; i < queue.list.size; ++i)
     {
-        sprintf(buffer, "->%d", node->id);
+        strcpy(str, "There's no path!");
+    }
+    else
+    {
+        char buffer[10];
+        Node * node = queue.list.root;
+        sprintf(buffer, "%d", node->id);
         strcat(str, buffer);
         node = node->next;
+        int i;
+        for(i = 1; i < queue.list.size; ++i)
+        {
+            sprintf(buffer, "->%d", node->id);
+            strcat(str, buffer);
+            node = node->next;
+        }
     }
-    printf("\n");
 }
 #endif

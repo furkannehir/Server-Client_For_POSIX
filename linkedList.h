@@ -50,15 +50,21 @@ LinkedList CreateLinkedList()
 
 void DestroyLinkedList(LinkedList * list)
 {
-    Node * one = list->root;
-    Node * second = list->root;
-    second = second->next;
-    int i;
-    for(i = 0; i < list->size; ++i)
+    if(list->size > 0)
     {
-        free(one);
-        one = second;
+        Node * one = list->root;
+        Node * second = list->root;
         second = second->next;
+        int i;
+        for(i = 0; i < list->size; ++i)
+        {
+            free(one);
+            if(second != NULL)
+            {
+                one = second;
+                second = second->next;
+            }
+        }
     }
 }
 #endif

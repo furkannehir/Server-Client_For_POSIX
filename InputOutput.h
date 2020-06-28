@@ -17,57 +17,97 @@ char READ[10] = "READ";
 char WRITE[10] = "WRITE";
 char WR[10] = "WR";
 
-void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile, int * poolThread, int * maxPool);
+void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile, int * poolThread, int * maxPool, int * prio);
 void GetArgumentsClient(int argc,char ** argv, char * IP, int * port, char * portString, int * sourceNode, int * destNode);
 int StringToInt(char* strToInt, int size);
 int OpenFile(char* filename, char* mode);
 void CloseFile(char * filename, int fileDescription);
-void LockFile(int fileDescription);
-void UnlockFile(int fileDescription);
+int LockFile(int fileDescription);
+int UnlockFile(int fileDescription);
 int StringCompare(char* first, char* second);
 int ReadFile(char* filename, int fileDescription, void* buffer, int count);
 int ReadOneLine(char * filename, int fileDescription, char * buffer);
+char * GetTimestamp(char * str);
 
 /*End of declaration*/
 
-void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile, int * poolThread, int * maxPool)
+void GetArgumentsServer(int argc, char ** argv, char * pathToFile, int * port, char * portString, char * pathToLogFile, int * poolThread, int * maxPool, int * prio)
 {
-    if(argc > 11)
+    if(argc > 13)
     {
         printf("Too many arguments maybe...\n");
-        printf("You should've called like that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24\n");
+        printf("You should've called like that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24 -r 0\n");
+        printf("Or that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24");
         exit(-1);
     }
     if(argc < 11)
     {
         printf("Too little arguments maybe...\n");
-        printf("You should've called like that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24\n");
+        printf("You should've called like that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24 -r 0\n");
+        printf("Or that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24");
         exit(-1);
     }
     int opt;
-    while((opt = getopt(argc, argv, "i:p:o:s:x:")) != -1)  
-    {  
-        switch(opt)  
+    if(argc == 13)
+    {
+        while((opt = getopt(argc, argv, "i:p:o:s:x:r:")) != -1)  
         {  
-            case 'i':
-                strcpy(pathToFile, optarg);
-                break;
-            case 'p':
-                *port = StringToInt(optarg, strlen(optarg));
-                strcpy(portString, optarg);
-                break;
-            case 'o':
-                strcpy(pathToLogFile, optarg);
-                break;
-            case 's':
-                *poolThread = StringToInt(optarg, strlen(optarg));
-                break;
-            case 'x':
-                *maxPool = StringToInt(optarg, strlen(optarg));
-                break;
-            default:
-                printf("Wrong argument!\n");
-                exit(-1);
+            switch(opt)  
+            {  
+                case 'i':
+                    strcpy(pathToFile, optarg);
+                    break;
+                case 'p':
+                    *port = StringToInt(optarg, strlen(optarg));
+                    strcpy(portString, optarg);
+                    break;
+                case 'o':
+                    strcpy(pathToLogFile, optarg);
+                    break;
+                case 's':
+                    *poolThread = StringToInt(optarg, strlen(optarg));
+                    break;
+                case 'x':
+                    *maxPool = StringToInt(optarg, strlen(optarg));
+                    break;
+                case 'r':
+                    *prio = StringToInt(optarg, strlen(optarg));
+                    break;
+                default:
+                    printf("Wrong argument!\n");
+                    printf("You should've called like that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24 -r 0\n");
+                    exit(-1);
+            }
+        }
+    }
+    else if(argc == 11)
+    {
+        *prio = 1;
+        while((opt = getopt(argc, argv, "i:p:o:s:x:")) != -1)  
+        {  
+            switch(opt)  
+            {  
+                case 'i':
+                    strcpy(pathToFile, optarg);
+                    break;
+                case 'p':
+                    *port = StringToInt(optarg, strlen(optarg));
+                    strcpy(portString, optarg);
+                    break;
+                case 'o':
+                    strcpy(pathToLogFile, optarg);
+                    break;
+                case 's':
+                    *poolThread = StringToInt(optarg, strlen(optarg));
+                    break;
+                case 'x':
+                    *maxPool = StringToInt(optarg, strlen(optarg));
+                    break;
+                default:
+                    printf("Wrong argument!\n");
+                    printf("You should've called like that: ./server -i pathToFile -p PORT -o pathToLogFile -s 4 -x 24 -r 0\n");
+                    exit(-1);
+            }
         }
     }
 }
@@ -195,19 +235,22 @@ void CloseFile(char * filename, int fileDescription)
     }
 }
 
-void LockFile(int fileDescription)
+int LockFile(int fileDescription)
 {
     struct flock lock;
     memset(&lock, 0, sizeof(lock));
     lock.l_type = F_WRLCK;
-    if(-1 == fcntl(fileDescription, F_SETLKW, &lock))
+    int num = fcntl(fileDescription, F_SETLK, &lock);
+    printf("lock : %d\n", num);
+    if(num > 0)
     {
-        printf("ERROR LOCKING THIS FILE!\n%s", strerror(errno));
-        fflush(stdout);
+        printf("ERROR LOCKING THIS FILE!: %s\n", strerror(errno));
+        return 0;
     }
+    return 1;
 }
 
-void UnlockFile(int fileDescription)
+int UnlockFile(int fileDescription)
 {
     struct flock lock;
     memset(&lock, 0, sizeof(lock));
@@ -215,8 +258,9 @@ void UnlockFile(int fileDescription)
     if(-1 == fcntl(fileDescription, F_SETLKW, &lock))
     {
         printf("ERROR LOCKING THIS FILE!\n%s", strerror(errno));
-        fflush(stdout);
+        return 0;
     }
+    return 1;
 }
 
 int StringCompare(char* first, char* second)
@@ -281,5 +325,24 @@ int ReadOneLine(char * filename, int fileDescription, char * buffer)
     }
     buffer[i] = '\0';
     return i;
+}
+
+char * GetTimestamp(char * str)
+{
+    time_t timer;
+    char temp[500];
+    time(&timer);
+    // printf("%s", ctime(&timer));
+    strcpy(temp, ctime(&timer));
+    int k = 0;
+    for(int i = 0; i < strlen(temp); ++i)
+    {
+        if(temp[i] != '\n'){
+            str[k] = temp[i];
+            ++k;
+        }
+    }
+    str[k] = '\0';
+    return str;
 }
 #endif

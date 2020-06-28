@@ -59,7 +59,8 @@ void DestroyGraph(Graph * graph)
     int i;
     for(i = 0; i < graph->size; ++i)
     {
-        DestroyLinkedList(&graph->AdjList[i]);
+        if(graph->AdjList[i].size > 0)
+            DestroyLinkedList(&graph->AdjList[i]);
     }
     free(graph->AdjList);
 }
@@ -101,22 +102,28 @@ void PrintGraph(Graph graph)
         printf("\n");
     }
 }
+
 int BreadthFirstSearch(Graph * graph, int startNode, int endNode, Queue * path)
 {
+    *path = CreateQueue();
     if(startNode == endNode)
     {
+        Enqueue(path, startNode);
+        Enqueue(path, endNode);
         return 1;
     }
-    *path = CreateQueue();
     LinkedList reversePath = CreateLinkedList();
     Queue queue = CreateQueue();
     int pred[graph->size];
     int dist[graph->size];
     int visited[graph->size];
-    memset(&pred, -1, graph->size);
-    memset(&dist, __INT_MAX__,  graph->size);
-    memset(&visited, 0,  graph->size);
     int curNode,i,isTherePath = 0;
+    for(i = 0; i < graph->size; ++i)
+    {
+        pred[i] = -1;
+        visited[i] = 0;
+        dist[i] = __INT_MAX__;
+    }
     Enqueue(&queue, startNode);
     visited[startNode] = 1;
     dist[startNode] = 0;
@@ -143,6 +150,7 @@ int BreadthFirstSearch(Graph * graph, int startNode, int endNode, Queue * path)
             break;
         }
     }
+    DestroyQueue(&queue);
     if(isTherePath)
     {
         int crawl = endNode;
@@ -162,8 +170,10 @@ int BreadthFirstSearch(Graph * graph, int startNode, int endNode, Queue * path)
         {
             Enqueue(path, temp[i]);
         }
+        DestroyLinkedList(&reversePath);
         return 1;
     }
+    DestroyLinkedList(&reversePath);
     return 0;
 }
 #endif

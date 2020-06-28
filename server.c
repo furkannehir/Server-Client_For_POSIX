@@ -6,39 +6,75 @@
 #include<netdb.h> 
 #include<netinet/in.h> 
 #include<fcntl.h>
+#include<sys/file.h>
 #include<time.h>
 #include"InputOutput.h"
 #include"graph.h"
+#include"requestQueue.h"
+#include"hashmap.h"
+#include<sys/signal.h>
 #define MAX 80
 #define BACKLOG 50
-#define INT_LEN 3000
+#define INT_LEN 300
+#define MYFILENAME "My Perfect File For Provide Duplicates"
 
-// TODO Threads
-// TODO Thread Pool -> array + mutex
-// TODO Cache -> Hashmap + mutex
-// TODO Reader-Writer -r
-
-int CreateConnection();
+void * CreateConnection(void * opt);
 void CreateAddrInfo(struct addrinfo * addr);
 int GetSocketFileDescriptor();
 int CloseSTD();
+void * BreadthFirstSearchRequestReaderPrio(void * opt);
+void * BreadthFirstSearchRequestWriterPrio(void * opt);
+void * BreadthFirstSearchRequestNoPrio(void * opt);
+double SystemLoad(int * emptyThreads, int size);
+int FindAnEmptyThread(int * emptyThreads, int size);
+void * SystemTrackThread(void * opt);
+void handler(int signo);
 
 
 char pathToFile[500];
 char pathToLogFile[500];
-int port, poolThread, maxPool;
+int port, threadPoolSize, maxPoolSize, fdOut, prio, myFD;
 char portString[500];
 Graph graph;
-int * threadPool;
-int * emptyThreads;
+hashmap cache;
+int readerCount = 0;
+pthread_mutex_t readMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t writeMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t tPoolMutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t tPoolLock = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t theresSpaceMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t * emptyThreadMutex;
+pthread_mutex_t * signalMutex; 
+pthread_cond_t * signalLock;
+pthread_cond_t * emptyThreadLock;
+pthread_cond_t theresSpaceLock = PTHREAD_COND_INITIALIZER;
+pthread_t mainThreadID, systemTrackID;
+pthread_t * threadPool;
+int * emptyThreads;
+Queue requests;
+char * pathString;
 
 int main(int argc, char ** argv)
 {
     setbuf(stdout, NULL);
-    GetArgumentsServer(argc, argv, pathToFile, &port, portString, pathToLogFile, &poolThread, &maxPool);
+    myFD = open(MYFILENAME, O_CREAT | O_EXCL);
+    if(myFD == -1)
+    {
+        printf("I can't be duplicated!\n");
+        exit(EXIT_FAILURE);
+    }
+    GetArgumentsServer(argc, argv, pathToFile, &port, portString, pathToLogFile, &threadPoolSize, &maxPoolSize, &prio);
+    printf("Executing with parameters:\n-i %s\n-p %s\n-o %s\n-s %d\n-x %d\n", pathToLogFile, portString, pathToLogFile, threadPoolSize, maxPoolSize);
     int pid = fork();
+    switch (pid)
+    {
+        case 0:
+            break;
+        case -1:
+            exit(EXIT_FAILURE);
+        default:
+            exit(EXIT_SUCCESS);
+    }
+    pid = fork();
     switch (pid)
     {
         case 0:
@@ -50,64 +86,109 @@ int main(int argc, char ** argv)
     }
     setsid();
     umask(0);
-    //chdir("/");
-    int fdOut = CloseSTD();
-    printf("Loading graph...\n");
+    //printf("pid: %d\n", getpid());
+    chdir("/");
+    fdOut = CloseSTD();
+    char timestamp[500];
+    printf("%s: Loading graph...\n", GetTimestamp(timestamp));
     int begin = clock();
     int size = GetMaxNodeID(pathToFile);
     CreateGraph(&graph, size);
+    cache = CreateHashmap();
     if(!FillTheGraph(&graph, pathToFile))
         return -1;
     int end = clock();
     double loadTime = end - begin;
     loadTime = loadTime / 1000000;
-    printf("Graph loaded in %.2f seconds with %d nodes and %d edges.\n", loadTime, size, graph.edgeCount);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handler;
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGINT, &sa, NULL);
+    printf("%s: Graph loaded in %.2f seconds with %d nodes and %d edges.\n", GetTimestamp(timestamp), loadTime, size, graph.edgeCount);
     // PrintGraph(graph);
-    CreateConnection();
+    requests = CreateQueue();
+    emptyThreads = (int*)calloc(maxPoolSize, sizeof(int));
+    emptyThreadMutex = (pthread_mutex_t*)calloc(maxPoolSize, sizeof(pthread_mutex_t));
+    emptyThreadLock = (pthread_cond_t*)calloc(maxPoolSize, sizeof(pthread_cond_t));
+    signalMutex = (pthread_mutex_t*)calloc(maxPoolSize, sizeof(pthread_mutex_t));
+    signalLock = (pthread_cond_t*)calloc(maxPoolSize, sizeof(pthread_cond_t));
+    int i, arr[maxPoolSize];
+    for(i = 0; i < maxPoolSize; ++i)
+    {
+        pthread_mutex_init(&emptyThreadMutex[i], NULL);
+        pthread_cond_init(&emptyThreadLock[i], NULL);
+        pthread_mutex_init(&signalMutex[i], NULL);
+        pthread_cond_init(&signalLock[i], NULL);
+    }
+    threadPool = (pthread_t*)calloc(maxPoolSize, sizeof(pthread_t));
+    for(i = 0; i <maxPoolSize; ++i)
+        arr[i] = i; 
+    pthread_create(&mainThreadID, NULL, CreateConnection, NULL);
+    pthread_create(&systemTrackID, NULL, SystemTrackThread, NULL);
+    for(i = 0; i < threadPoolSize; ++i)
+    {
+        if(prio == 0)
+            pthread_create(&threadPool[i], NULL, BreadthFirstSearchRequestReaderPrio, &arr[i]);
+        if(prio == 1)
+            pthread_create(&threadPool[i], NULL, BreadthFirstSearchRequestWriterPrio, &arr[i]);
+        if(prio == 2)
+            pthread_create(&threadPool[i], NULL, BreadthFirstSearchRequestNoPrio, &arr[i]);
+    }
+    printf("%s: A pool of %d threads has been created\n", GetTimestamp(timestamp), threadPoolSize);
+    pthread_join(mainThreadID, NULL);
+    for(i = 0; i < threadPoolSize; ++i)
+    {
+        pthread_join(threadPool[i], NULL);
+    }
+    pthread_join(systemTrackID, NULL);
+    free(emptyThreads);
+    free(threadPool);
+    for(i = 0; i < maxPoolSize; ++i)
+    {
+        pthread_mutex_destroy(&emptyThreadMutex[i]);
+        pthread_cond_destroy(&emptyThreadLock[i]);
+        pthread_mutex_destroy(&signalMutex[i]);
+        pthread_cond_destroy(&signalLock[i]);
+    }
+// emptyThreadMutex
+    free(emptyThreadMutex);
+// emptyThreadLock 
+    free(emptyThreadLock);
+// signalMutex
+    free(signalMutex);
+// signalLock
+    free(signalLock);
     DestroyGraph(&graph);
+    DestroyHashmap(&cache);
     CloseFile("stdout", fdOut);
+    CloseFile("lock", myFD);
+    unlink(MYFILENAME);
 }
 
 
-int CreateConnection()
+void * CreateConnection(void * opt)
 {
     struct sockaddr_storage claddr;
     int cfd;
     socklen_t addrlen;
-    char reqLenStr[INT_LEN];
     #define ADDRSTRLEN (NI_MAXHOST + NI_MAXSERV + 10)
-    char addrStr[ADDRSTRLEN];
-    char host[NI_MAXHOST];
-    char service[NI_MAXSERV];
-    int socketID;
+    int socketID, t_id;
     socketID = GetSocketFileDescriptor();
-    addrlen = sizeof(struct sockaddr_storage);
-    cfd = accept(socketID, (struct sockaddr *) &claddr, &addrlen);
-    if (cfd == -1) {
-        printf("Error in accept!\n");
-    }
-    else
+    for(;;)
     {
-        printf("Connection established\n");
+        addrlen = sizeof(struct sockaddr_storage);
+        cfd = accept(socketID, (struct sockaddr *) &claddr, &addrlen);
+        pthread_mutex_lock(&tPoolMutex);
+        t_id = FindAnEmptyThread(emptyThreads, threadPoolSize);
+        emptyThreads[t_id] = cfd;
+        pthread_mutex_lock(&emptyThreadMutex[t_id]);
+        pthread_cond_signal(&emptyThreadLock[t_id]);
+        pthread_mutex_unlock(&emptyThreadMutex[t_id]);
+        pthread_mutex_unlock(&tPoolMutex);
     }
-    if (getnameinfo((struct sockaddr *) &claddr, addrlen, host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0)
-        snprintf(addrStr, ADDRSTRLEN, "(%s, %s)", host, service);
-    else
-        snprintf(addrStr, ADDRSTRLEN, "(?UNKNOWN?)");
-    printf("Connection from %s\n", addrStr);
-    ReadFile("pipe", cfd, reqLenStr, INT_LEN);
-    printf("%s\n", reqLenStr);
-    int start, destination;
-    sscanf(reqLenStr, "%d %d", &start, &destination);
-    Queue path;
-    path = CreateQueue();
-    BreadthFirstSearch(&graph, start, destination, &path);
-    char pathString[5000];
-    QueueString(path, pathString);
-    WriteFile("pipe", cfd, pathString, strlen(pathString));
-    close(cfd);
-    close(socketID); 
-    return 0;
+    close(socketID);
+    return NULL;
 }
 
 void CreateAddrInfo(struct addrinfo * addr)
@@ -152,7 +233,7 @@ int GetSocketFileDescriptor()
         printf("Could not bind socket to any address\n");
     if (listen(fileDesc, BACKLOG) == -1)
     {
-        printf("listen");
+        printf("Error on listen: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
     freeaddrinfo(result);
@@ -172,4 +253,312 @@ int CloseSTD()
      if (dup2(STDIN_FILENO, STDERR_FILENO) != STDERR_FILENO)
         return -1;
     return fdOut; 
+}
+
+void * BreadthFirstSearchRequestReaderPrio(void * opt)
+{
+    int * t_idAddr = (int*)opt;
+    int t_id = *t_idAddr;
+    int cfd;
+    Queue path = CreateQueue();
+    char timestamp[500], reqLenStr[INT_LEN];
+    hashNode hNode;
+    while(1)
+    {
+        printf("%s: Thread #%d: waiting for connection\n", GetTimestamp(timestamp), t_id);
+        pthread_mutex_lock(&emptyThreadMutex[t_id]);
+        //SIGNAL STUFF
+        pthread_mutex_lock(&signalMutex[t_id]);
+        pthread_cond_signal(&signalLock[t_id]);
+        pthread_mutex_unlock(&signalMutex[t_id]);
+        pthread_mutex_unlock(&tPoolMutex);
+        //ENDSIGNALSTUFF
+        pthread_cond_wait(&emptyThreadLock[t_id], &emptyThreadMutex[t_id]);
+        pthread_mutex_lock(&tPoolMutex);
+        cfd = emptyThreads[t_id];
+        pthread_mutex_unlock(&tPoolMutex);
+        pthread_mutex_unlock(&emptyThreadMutex[t_id]);
+        if(cfd > 0)
+        {
+            printf("%s: A connection has been delegated to thread id #%d, system load %.2f%%\n", GetTimestamp(timestamp), t_id, SystemLoad(emptyThreads, threadPoolSize));
+            ReadFile("pipe", cfd, reqLenStr, INT_LEN);
+            int start, destination;
+            sscanf(reqLenStr, "%d %d", &start, &destination);
+            pthread_mutex_lock(&readMutex);
+            hNode = GetItemHashmap(&cache, reqLenStr);
+            pthread_mutex_unlock(&readMutex);
+            if(strcmp(hNode.key, ""))
+            {
+                WriteFile("pipe", cfd, hNode.value, strlen(hNode.value));
+            }
+            else
+            {
+                path = CreateQueue();
+                BreadthFirstSearch(&graph, start, destination, &path);
+                pathString = (char*)calloc(5000, sizeof(char));
+                QueueString(path, pathString);
+                pthread_mutex_lock(&readMutex);
+                pthread_mutex_unlock(&readMutex);
+                InsertHashmap(&cache, reqLenStr, pathString);
+                WriteFile("pipe", cfd, pathString, strlen(pathString));
+                DestroyQueue(&path);
+                free(pathString);
+            }
+            close(cfd);
+        }
+        pthread_mutex_lock(&tPoolMutex);
+        double load = SystemLoad(emptyThreads, threadPoolSize);
+        pthread_mutex_unlock(&tPoolMutex);
+        if(load == 100.0)
+        {
+            pthread_mutex_lock(&theresSpaceMutex);
+            pthread_cond_signal(&theresSpaceLock);
+            pthread_mutex_unlock(&theresSpaceMutex);
+        }
+        pthread_mutex_lock(&tPoolMutex);
+        emptyThreads[t_id] = 0;
+    }
+    return NULL;
+}
+
+void * BreadthFirstSearchRequestWriterPrio(void * opt)
+{
+    int * t_idAddr = (int*)opt;
+    int t_id = *t_idAddr;
+    int cfd;
+    Queue path = CreateQueue();
+    char timestamp[500], reqLenStr[INT_LEN];
+    hashNode hNode;
+    while(1)
+    {
+        printf("%s: Thread #%d: waiting for connection\n", GetTimestamp(timestamp), t_id);
+        pthread_mutex_lock(&emptyThreadMutex[t_id]);
+        //SIGNAL STUFF
+        pthread_mutex_lock(&signalMutex[t_id]);
+        pthread_cond_signal(&signalLock[t_id]);
+        pthread_mutex_unlock(&signalMutex[t_id]);
+        pthread_mutex_unlock(&tPoolMutex);
+        //ENDSIGNALSTUFF
+        pthread_cond_wait(&emptyThreadLock[t_id], &emptyThreadMutex[t_id]);
+        pthread_mutex_lock(&tPoolMutex);
+        cfd = emptyThreads[t_id];
+        pthread_mutex_unlock(&tPoolMutex);
+        pthread_mutex_unlock(&emptyThreadMutex[t_id]);
+        if(cfd > 0)
+        {
+            printf("%s: A connection has been delegated to thread id #%d, system load %.2f%%\n", GetTimestamp(timestamp), t_id, SystemLoad(emptyThreads, threadPoolSize));
+            ReadFile("pipe", cfd, reqLenStr, INT_LEN);
+            int start, destination;
+            sscanf(reqLenStr, "%d %d", &start, &destination);
+            pthread_mutex_lock(&writeMutex);
+            pthread_mutex_unlock(&writeMutex);
+            hNode = GetItemHashmap(&cache, reqLenStr);
+            if(strcmp(hNode.key, ""))
+            {
+                WriteFile("pipe", cfd, hNode.value, strlen(hNode.value));
+            }
+            else
+            {
+                path = CreateQueue();
+                BreadthFirstSearch(&graph, start, destination, &path);
+                pathString = (char*)calloc(5000, sizeof(char));
+                QueueString(path, pathString);
+                pthread_mutex_lock(&writeMutex);
+                InsertHashmap(&cache, reqLenStr, pathString);
+                pthread_mutex_unlock(&writeMutex);
+                WriteFile("pipe", cfd, pathString, strlen(pathString));
+                DestroyQueue(&path);
+                free(pathString);
+            }
+            close(cfd);
+        }
+        pthread_mutex_lock(&tPoolMutex);
+        double load = SystemLoad(emptyThreads, threadPoolSize);
+        pthread_mutex_unlock(&tPoolMutex);
+        if(load == 100.0)
+        {
+            pthread_mutex_lock(&theresSpaceMutex);
+            pthread_cond_signal(&theresSpaceLock);
+            pthread_mutex_unlock(&theresSpaceMutex);
+        }
+        pthread_mutex_lock(&tPoolMutex);
+        emptyThreads[t_id] = 0;
+        pthread_mutex_unlock(&tPoolMutex);
+    }
+    return NULL;
+}
+
+void * BreadthFirstSearchRequestNoPrio(void * opt)
+{
+    int * t_idAddr = (int*)opt;
+    int t_id = *t_idAddr;
+    int cfd;
+    Queue path = CreateQueue();
+    char timestamp[500], reqLenStr[INT_LEN];
+    hashNode hNode;
+    while(1)
+    {
+        printf("%s: Thread #%d: waiting for connection\n", GetTimestamp(timestamp), t_id);
+        pthread_mutex_lock(&emptyThreadMutex[t_id]);
+        //SIGNAL STUFF
+        pthread_mutex_lock(&signalMutex[t_id]);
+        pthread_cond_signal(&signalLock[t_id]);
+        pthread_mutex_unlock(&signalMutex[t_id]);
+        pthread_mutex_unlock(&tPoolMutex);
+        //ENDSIGNALSTUFF
+        pthread_cond_wait(&emptyThreadLock[t_id], &emptyThreadMutex[t_id]);
+        pthread_mutex_lock(&tPoolMutex);
+        cfd = emptyThreads[t_id];
+        pthread_mutex_unlock(&tPoolMutex);
+        pthread_mutex_unlock(&emptyThreadMutex[t_id]);
+        if(cfd > 0)
+        {
+            printf("%s: A connection has been delegated to thread id #%d, system load %.2f%%\n", GetTimestamp(timestamp), t_id, SystemLoad(emptyThreads, threadPoolSize));
+            ReadFile("pipe", cfd, reqLenStr, INT_LEN);
+            int start, destination;
+            sscanf(reqLenStr, "%d %d", &start, &destination);
+            hNode = GetItemHashmap(&cache, reqLenStr);
+            if(strcmp(hNode.key, ""))
+            {
+                WriteFile("pipe", cfd, hNode.value, strlen(hNode.value));
+            }
+            else
+            {
+                path = CreateQueue();
+                BreadthFirstSearch(&graph, start, destination, &path);
+                pathString = (char*)calloc(5000, sizeof(char));
+                QueueString(path, pathString);
+                InsertHashmap(&cache, reqLenStr, pathString);
+                WriteFile("pipe", cfd, pathString, strlen(pathString));
+                DestroyQueue(&path);
+                free(pathString);
+            }
+            close(cfd);
+        }
+        pthread_mutex_lock(&tPoolMutex);
+        double load = SystemLoad(emptyThreads, threadPoolSize);
+        pthread_mutex_unlock(&tPoolMutex);
+        if(load == 100.0)
+        {
+            pthread_mutex_lock(&theresSpaceMutex);
+            pthread_cond_signal(&theresSpaceLock);
+            pthread_mutex_unlock(&theresSpaceMutex);
+        }
+        pthread_mutex_lock(&tPoolMutex);
+        emptyThreads[t_id] = 0;
+        pthread_mutex_unlock(&tPoolMutex);
+    }
+    return NULL;
+}
+
+
+double SystemLoad(int * emptyThreads, int size)
+{
+    int i, busy = 0;
+    for(i = 0; i < size; ++i)
+    {
+        if(emptyThreads[i])
+            ++busy;
+    }
+    double load = (double)busy;
+    load = load/size*100;
+    return load;
+}
+
+int FindAnEmptyThread(int * emptyThreads, int size)
+{
+    int i;
+    double load = SystemLoad(emptyThreads, threadPoolSize);
+    if(load == 100.0)
+    {
+            pthread_mutex_lock(&theresSpaceMutex);
+            pthread_cond_wait(&theresSpaceLock, &theresSpaceMutex);
+            pthread_mutex_unlock(&theresSpaceMutex);
+    }
+    for(i = 0; i < size; ++i)
+    {
+        if(emptyThreads[i] == 0)
+            return i;
+    }
+    return -1;
+}
+
+void * SystemTrackThread(void * opt)
+{
+    int i, threadPoolSizeAug;
+    double load;
+    int arr[maxPoolSize];
+    char timestamp[500];
+    for(i = 0; i < maxPoolSize; ++i)
+        arr[i] = i;
+    for(;;)
+    {
+        pthread_mutex_lock(&tPoolMutex);
+        load = SystemLoad(emptyThreads, threadPoolSize);
+        pthread_mutex_unlock(&tPoolMutex);
+        if(load >= 75.0 && threadPoolSize < maxPoolSize)
+        {
+            threadPoolSizeAug = threadPoolSize * 1.25;
+            if(threadPoolSizeAug > maxPoolSize)
+                threadPoolSizeAug = maxPoolSize;
+            for(i = threadPoolSize; i < threadPoolSizeAug; ++i)
+            {
+                if(prio == 0)
+                    pthread_create(&threadPool[i], NULL, BreadthFirstSearchRequestReaderPrio, &arr[i]);
+                if(prio == 1)
+                    pthread_create(&threadPool[i], NULL, BreadthFirstSearchRequestWriterPrio, &arr[i]);
+                if(prio == 2)
+                    pthread_create(&threadPool[i], NULL, BreadthFirstSearchRequestNoPrio, &arr[i]);
+            }
+            threadPoolSize = threadPoolSizeAug;
+            printf("%s: System load %.2f%%, pool extended to %d threads\n", GetTimestamp(timestamp),load, threadPoolSize);
+        }
+    }
+}
+
+void handler(int signo)
+{
+    char timestamp[500];
+    switch (signo)
+    {
+        case SIGINT:
+            pthread_cancel(mainThreadID);
+            pthread_cancel(systemTrackID);
+            int i;
+            for(i = 0; i < threadPoolSize; ++i)
+            {
+                pthread_mutex_lock(&signalMutex[i]);
+                if(emptyThreads[i])
+                {
+                    pthread_cond_wait(&signalLock[i], &signalMutex[i]);
+                }
+                pthread_cancel(threadPool[i]);
+                pthread_mutex_unlock(&signalMutex[i]);
+            }
+        // emptyThreads
+            free(emptyThreads);
+            free(threadPool);
+            for(i = 0; i < maxPoolSize; ++i)
+            {
+                pthread_mutex_destroy(&emptyThreadMutex[i]);
+                pthread_cond_destroy(&emptyThreadLock[i]);
+                pthread_mutex_destroy(&signalMutex[i]);
+                pthread_cond_destroy(&signalLock[i]);
+            }
+        // emptyThreadMutex
+            free(emptyThreadMutex);
+        // emptyThreadLock 
+            free(emptyThreadLock);
+        // signalMutex
+            free(signalMutex);
+        // signalLock
+            free(signalLock);
+            DestroyGraph(&graph);
+            DestroyHashmap(&cache);
+            printf("%s: Now I can rest.\n", GetTimestamp(timestamp));
+            CloseFile("stdout", fdOut);
+            CloseFile("lock", myFD);
+            unlink(MYFILENAME);
+            exit(EXIT_FAILURE);
+    }
 }
